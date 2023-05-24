@@ -9,6 +9,8 @@ namespace DBMaintainer
     {
         static void Main(string[] args)
         {
+            int statementsExecuted = 0;
+
             try
             {
                 // Get the current directory (where the ScriptFile.txt file should reside):
@@ -21,12 +23,14 @@ namespace DBMaintainer
                 // Split the script contents by semicolon to separate individual SQL statements
                 string[] statements = scriptContents.Split(';');
 
-                // Get the connection string from the first line of the script file
-                string connectionString = statements[0].Trim();
+                // Get the server name and DB name from the first 2 lines of the script file
+                string servName = statements[0].Trim();
+                string dbName = statements[1].Trim();  
+                string connectionString = MakeSQLConnectionString(servName, dbName);
 
                 // Remove the connection string from the statements array
-                string[] sqlStatements = new string[statements.Length - 1];
-                Array.Copy(statements, 1, sqlStatements, 0, sqlStatements.Length);
+                string[] sqlStatements = new string[statements.Length - 2];
+                Array.Copy(statements, 2, sqlStatements, 0, sqlStatements.Length);
 
                 // Connect to the database and execute the SQL statements
                 using (SqlConnection connection = new SqlConnection(connectionString))
@@ -39,12 +43,13 @@ namespace DBMaintainer
                             using (SqlCommand command = new SqlCommand(sqlStatement, connection))
                             {
                                 command.ExecuteNonQuery();
+                                statementsExecuted++;
                             }
                         }
                     }
                 }
 
-                Console.WriteLine($"Database Maintenance complete. Executed {sqlStatements.Count()} statements.");
+                Console.WriteLine($"Database Maintenance complete. Executed {statementsExecuted} statements.");
             }
             catch (Exception ex)
             {
@@ -54,5 +59,29 @@ namespace DBMaintainer
             Console.WriteLine("Press any key to exit.");
             Console.ReadKey();
         }
+
+        private static string MakeSQLConnectionString(string serverName, string dbName)
+        {
+            string theConnStr = "";
+
+            // Server and DB must be specified:
+            if (!string.IsNullOrEmpty(serverName) && !string.IsNullOrEmpty(dbName))
+            {
+                // Initialize the connection string builder for the
+                // underlying provider:
+                SqlConnectionStringBuilder sqlBuilder = new SqlConnectionStringBuilder();
+
+                // Set the properties for the data source:
+                sqlBuilder.DataSource = serverName;
+                sqlBuilder.InitialCatalog = dbName;
+                sqlBuilder.IntegratedSecurity = true;
+
+                theConnStr = sqlBuilder.ToString();
+            }
+
+            return theConnStr;
+        }
     }
+
+
 }
