@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
@@ -7,6 +8,16 @@ namespace DBMaintainer
 {
     internal class Program
     {
+        // Pompts for any needed inputs from user:
+        private static List<string> paramPrompts = new List<string>();
+
+        private static string completeMsg;
+
+        private static List<string> paramInputs = new List<string>();
+
+        private static string connectionString;
+        private static string[] sqlStatements;
+
         static void Main(string[] args)
         {
             int statementsExecuted = 0;
@@ -18,38 +29,38 @@ namespace DBMaintainer
 
                 // Read the text file containing the connection string and SQL statements
                 string filePath = Path.Combine(curDirectory, "ScriptFile.txt");
-                string scriptContents = File.ReadAllText(filePath);
 
-                // Split the script contents by semicolon to separate individual SQL statements
-                string[] statements = scriptContents.Split(';');
-
-                // Get the server name and DB name from the first 2 lines of the script file
-                string servName = statements[0].Trim();
-                string dbName = statements[1].Trim();  
-                string connectionString = MakeSQLConnectionString(servName, dbName);
-
-                // Remove the connection string from the statements array
-                string[] sqlStatements = new string[statements.Length - 2];
-                Array.Copy(statements, 2, sqlStatements, 0, sqlStatements.Length);
-
-                // Connect to the database and execute the SQL statements
-                using (SqlConnection connection = new SqlConnection(connectionString))
+                // If the script file is usable:
+                if (ParseScriptFile(Path.Combine(curDirectory, "ScriptFile.txt")))
                 {
-                    connection.Open();
-                    foreach (string sqlStatement in sqlStatements)
+                    // Prompt for update parameters, if any:
+                    GetUserParams();
+
+                    // Modify the SQL statements with the paramters as needed:
+                    ApplyUserParams(sqlStatements);
+
+                    // Connect to the database and execute the SQL statements
+                    using (SqlConnection connection = new SqlConnection(connectionString))
                     {
-                        if (!string.IsNullOrWhiteSpace(sqlStatement))
+                        connection.Open();
+                        foreach (string sqlStatement in sqlStatements)
                         {
-                            using (SqlCommand command = new SqlCommand(sqlStatement, connection))
+                            if (!string.IsNullOrWhiteSpace(sqlStatement))
                             {
-                                command.ExecuteNonQuery();
-                                statementsExecuted++;
+                                using (SqlCommand command = new SqlCommand(sqlStatement, connection))
+                                {
+                                    command.ExecuteNonQuery();
+                                    statementsExecuted++;
+                                }
                             }
                         }
                     }
-                }
 
-                Console.WriteLine($"Database Maintenance complete. Executed {statementsExecuted} statements.");
+                    Console.WriteLine($"Database Maintenance complete. Executed {statementsExecuted} statements.");
+
+                    if (!string.IsNullOrEmpty(completeMsg))
+                        Console.WriteLine(completeMsg);
+                }
             }
             catch (Exception ex)
             {
@@ -58,6 +69,89 @@ namespace DBMaintainer
 
             Console.WriteLine("Press any key to exit.");
             Console.ReadKey();
+        }
+
+        private static bool ParseScriptFile(string filePath)
+        {
+            bool result = false;
+            int commandStartLine = 2;
+
+            try 
+            {
+                // Read in the file:
+                string scriptContents = File.ReadAllText(filePath);
+                string[] statements = scriptContents.Split(';');
+
+                // Pull out the server and DB info to make the connection string:
+                string servName = statements[0].Trim();
+                string dbName = statements[1].Trim();
+                connectionString = MakeSQLConnectionString(servName, dbName);
+
+                // Pull out needed parameter prompts:
+                while (statements[commandStartLine].Trim().StartsWith("PARAM:"))
+                {
+                    paramPrompts.Add(statements[commandStartLine].Trim().Substring(6).Trim());
+                    commandStartLine++;
+                }
+
+                // Pull out the success message:
+                if (statements[commandStartLine].Trim().StartsWith("MSG:"))
+                {
+                    completeMsg = statements[commandStartLine].Trim().Substring(4).Trim();
+                    commandStartLine++;
+                }
+
+                // Pull out the SQL commands:
+                sqlStatements = new string[statements.Length - commandStartLine];
+                Array.Copy(statements, commandStartLine, sqlStatements, 0, sqlStatements.Length);
+
+                result = true;
+            }
+            catch (Exception ex) 
+            {
+                Console.WriteLine("Could not parse the script file: " + ex.Message);
+            }
+
+            return result;
+        }
+
+        private static void GetUserParams()
+        {
+            // Must have prompts to show. If no prompts, then there must not be a need
+            // for user-entered parameters:
+            if (paramPrompts != null && paramPrompts.Count > 0)
+            {
+                // Display each prompt and load the user's input into the param list:
+                foreach(string prompt in paramPrompts)
+                {
+                    if (!string.IsNullOrWhiteSpace(prompt))
+                    {
+                        Console.Write($"{prompt} ");
+                        paramInputs.Add(Console.ReadLine());
+                    }
+                }
+            }
+        }
+
+        private static void ApplyUserParams(string[] sqlStatements)
+        {
+            // If there are user params to apply:
+            if (paramInputs != null && paramInputs.Count > 0)
+            {
+                // If there are database update commands:
+                if (sqlStatements != null && sqlStatements.Length > 0)
+                {
+                    for (int stmtIndex = 0; stmtIndex < sqlStatements.Length; stmtIndex++)
+                    {
+                        // Replace each param placeholder found in this statement with the
+                        // corresponding user input:
+                        for (int i = 0; i < paramInputs.Count; i++)
+                        {
+                            sqlStatements[stmtIndex] = sqlStatements[stmtIndex].Replace("{"+i+"}", paramInputs[i]);
+                        }
+                    }
+                }
+            }
         }
 
         private static string MakeSQLConnectionString(string serverName, string dbName)
